@@ -1,17 +1,13 @@
 # AutoService Retention SaaS
 
-iOS-first retention and operations platform for professional auto garages.
+iOS-first retention + operations system for professional auto garages.
 
-## Purpose
-Automates scheduling, client communication, service reminders, and daily workflow
-using Google Calendar, WhatsApp/SMS, and vehicle data.
-
-## Structure
+## Repo structure
 - backend/ → API, messaging, automations
 - ios/ → iOS owner app (SwiftUI)
-- admin/ → Web admin console
-- infra/ → Docker & deployment
+- admin/ → Admin console (later)
+- infra/ → Docker & env templates
 - docs/ → Product & API specs
 
 ## Status
-🚧 MVP in active development
+🚧 MVP in development
