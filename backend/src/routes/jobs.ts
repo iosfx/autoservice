@@ -5,16 +5,16 @@ import { listJobsByDate, updateJobStatus } from '../services/jobService';
 import { sendMessage } from '../services/messagingService';
 
 export async function jobRoutes(app: FastifyInstance) {
-  app.get('/jobs', { preValidation: authenticate }, async (request, reply) => {
-    const { date } = request.query as { date?: string };
-    const user = request.user;
-    if (!user?.shopId) {
-      return reply.code(401).send({ message: 'Unauthorized' });
-    }
+app.get("/jobs", { preValidation: authenticate }, async (request, reply) => {
+  const { date } = request.query as { date?: string };
 
-    const jobs = await listJobsByDate(user.shopId, date);
-    return { jobs };
-  });
+  // jwtVerify already ran in authenticate, so request.user is present
+  const { shopId } = request.user;
+
+  const jobs = await listJobsByDate(shopId, date);
+  return { jobs };
+});
+
 
   app.post('/jobs/:id/status', { preValidation: authenticate }, async (request, reply) => {
     const { id } = request.params as { id: string };
