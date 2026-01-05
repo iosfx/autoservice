@@ -9,6 +9,7 @@ import { carRoutes } from './routes/cars';
 import { retentionRoutes } from './routes/retention';
 import { messageRoutes } from './routes/messages';
 import { dashboardRoutes } from './routes/dashboard';
+import { templateRoutes } from './routes/templates';
 import { authenticate } from './middleware/auth';
 import { prisma } from './db/client';
 
@@ -41,6 +42,7 @@ async function buildServer() {
   await app.register(carRoutes);
   await app.register(retentionRoutes);
   await app.register(messageRoutes);
+  await app.register(templateRoutes);
 
   return app;
 }

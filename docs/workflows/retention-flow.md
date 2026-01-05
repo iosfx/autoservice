@@ -100,13 +100,61 @@ Mike repeats this for 50 of his regular customers.
 
 ---
 
-## Step 2: Configure Retention Rules
+## Step 2: Setup Message Templates
 
-Mike wants to send reminders to customers who:
-1. Haven't had service in 6 months (180 days)
-2. Have driven more than 5,000 miles since last service
+Mike first needs to seed default message templates for his garage. The system comes with pre-configured Romanian templates for all trigger types:
 
-### 2.1 Time-Based Rule
+### 2.1 Seed Default Templates
+
+```bash
+POST /templates/seed-defaults
+Authorization: Bearer <token>
+{
+  "overwrite": false
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "created": 9,
+  "updated": 0,
+  "skipped": 0,
+  "message": "Created 9 templates, updated 0, skipped 0"
+}
+```
+
+This creates default templates for:
+- SERVICE_DUE_TIME (SMS + WhatsApp)
+- SERVICE_DUE_MILEAGE (SMS + WhatsApp)
+- INACTIVITY, BIRTHDAY, FOLLOW_UP, APPT_REMINDER, READY (SMS versions)
+
+### 2.2 Customize a Template (Optional)
+
+Mike can customize any template. For example, to update the time-based reminder for WhatsApp:
+
+```bash
+GET /templates?triggerType=SERVICE_DUE_TIME&channel=WHATSAPP
+Authorization: Bearer <token>
+```
+
+Then update it:
+```bash
+PUT /templates/<template-id>
+Authorization: Bearer <token>
+{
+  "body": "Bună, {{clientName}}! 👋\nA trecut mult timp de la ultima revizie pentru {{carLicensePlate}}.\nVrei să te programăm pentru o verificare?\n— {{garageName}}"
+}
+```
+
+---
+
+## Step 3: Configure Retention Rules
+
+Mike configures retention rules that determine when messages should be triggered:
+
+### 3.1 Time-Based Rule
 
 ```bash
 POST /retention/rules
@@ -114,11 +162,11 @@ Authorization: Bearer <token>
 {
   "type": "TIME",
   "threshold": 180,
-  "messageTemplate": "Hi {{clientName}}! It's been {{daysSinceService}} days since your last service for {{licensePlate}}. Time for a checkup! - Mike's Auto Shop"
+  "messageTemplate": "Legacy field - now uses MessageTemplate system"
 }
 ```
 
-### 2.2 Mileage-Based Rule
+### 3.2 Mileage-Based Rule
 
 ```bash
 POST /retention/rules
@@ -126,13 +174,15 @@ Authorization: Bearer <token>
 {
   "type": "MILEAGE",
   "threshold": 5000,
-  "messageTemplate": "Hi {{clientName}}! Your {{licensePlate}} has driven {{mileageSinceService}} miles since your last service. Let's schedule a maintenance appointment! - Mike's Auto Shop"
+  "messageTemplate": "Legacy field - now uses MessageTemplate system"
 }
 ```
 
+**Note**: The `messageTemplate` field in RetentionRule is now legacy. The system automatically resolves templates from the MessageTemplate table based on `triggerType` and `channel` (preferring WhatsApp, falling back to SMS).
+
 ---
 
-## Step 3: Sync Calendar
+## Step 4: Sync Calendar
 
 Mike syncs his Google Calendar to import past appointments:
 
@@ -161,7 +211,7 @@ The system:
 
 ---
 
-## Step 4: Run Retention Generation
+## Step 5: Run Retention Generation
 
 Mike manually triggers retention generation to create message queue items:
 
@@ -218,7 +268,7 @@ Authorization: Bearer <token>
 
 ---
 
-## Step 5: Check Dashboard
+## Step 6: Check Dashboard
 
 Mike checks his dashboard to see what's scheduled:
 
@@ -255,7 +305,7 @@ Authorization: Bearer <token>
 
 ---
 
-## Step 6: Dispatch Messages
+## Step 7: Dispatch Messages
 
 Mike manually dispatches all due messages:
 
@@ -295,7 +345,7 @@ Authorization: Bearer <token>
 
 ---
 
-## Step 7: Review Queue Status
+## Step 8: Review Queue Status
 
 Mike checks the message queue to see what's happened:
 
@@ -333,9 +383,9 @@ Authorization: Bearer <token>
 
 ---
 
-## Step 8: Manual Actions
+## Step 9: Manual Actions
 
-### 8.1 Send a Single Message Now
+### 9.1 Send a Single Message Now
 
 Mike wants to immediately send a specific queued message:
 
@@ -344,7 +394,7 @@ POST /retention/queue/queue-005/send-now
 Authorization: Bearer <token>
 ```
 
-### 8.2 Cancel a Scheduled Message
+### 9.2 Cancel a Scheduled Message
 
 A customer called and scheduled already, so Mike cancels their reminder:
 
@@ -353,7 +403,7 @@ POST /retention/queue/queue-003/cancel
 Authorization: Bearer <token>
 ```
 
-### 8.3 Reschedule a Message
+### 9.3 Reschedule a Message
 
 Mike wants to delay a message until next week:
 
@@ -367,7 +417,7 @@ Authorization: Bearer <token>
 
 ---
 
-## Step 9: Customer Comes In
+## Step 10: Customer Comes In
 
 John Doe comes in for service. Mike updates his car's mileage:
 
@@ -383,7 +433,7 @@ This also updates `lastServiceDate` to now, so John won't get another retention 
 
 ---
 
-## Step 10: Ongoing Operations
+## Step 11: Ongoing Operations
 
 ### Daily Routine:
 1. **Morning**: Mike syncs his calendar (`POST /calendar/sync`)
@@ -403,7 +453,7 @@ Mike reviews:
 
 ---
 
-## Step 11: Blocked Messages Resolution
+## Step 12: Blocked Messages Resolution
 
 Mike notices 3 blocked messages due to missing mileage data. He:
 
@@ -455,19 +505,86 @@ BLOCKED (when created with missing data)
 
 ---
 
-## Message Templates
+## Message Template System
 
-Mike can customize message templates using variables:
+The system uses a centralized template management system with the following features:
+
+### Template Resolution
+- Templates are resolved based on `triggerType` (e.g., SERVICE_DUE_TIME) and `channel` (SMS or WHATSAPP)
+- **WhatsApp is preferred** - System tries WhatsApp first, falls back to SMS if no WhatsApp template exists
+- Templates can be enabled/disabled without deleting them
+
+### Available Placeholders
+
+Templates support the following variables:
 
 - `{{clientName}}` - Customer's name
-- `{{licensePlate}}` - Car's license plate
+- `{{clientPhone}}` - Customer's phone number
+- `{{carLicensePlate}}` - Car's license plate
+- `{{carVin}}` - Car's VIN number
+- `{{carMake}}` - Car manufacturer
+- `{{carModel}}` - Car model
+- `{{currentMileage}}` - Current odometer reading
+- `{{lastServiceDate}}` - Date of last service
+- `{{scheduledFor}}` - Scheduled appointment date
+- `{{garageName}}` - Garage name
 - `{{daysSinceService}}` - Days since last service (TIME rules)
 - `{{mileageSinceService}}` - Miles since last service (MILEAGE rules)
 
-Example:
+### Template APIs
+
+**List all templates**:
+```bash
+GET /templates?triggerType=SERVICE_DUE_TIME&channel=WHATSAPP
 ```
-"Hi {{clientName}}! Your {{licensePlate}} is due for service. It's been {{daysSinceService}} days. Call us to schedule! - Mike's Auto Shop"
+
+**Create custom template**:
+```bash
+POST /templates
+{
+  "templateKey": "custom_reminder_sms",
+  "triggerType": "SERVICE_DUE_TIME",
+  "channel": "SMS",
+  "name": "Custom Time Reminder",
+  "body": "Salut {{clientName}}! Mașina {{carLicensePlate}} necesită revizie. {{garageName}}"
+}
 ```
+
+**Preview template rendering**:
+```bash
+POST /templates/preview
+{
+  "body": "Salut {{clientName}}! Pentru {{carLicensePlate}}...",
+  "variables": {
+    "clientName": "Ion Popescu",
+    "carLicensePlate": "B-123-ABC",
+    "garageName": "Mike's Auto Shop"
+  }
+}
+```
+
+**Get allowed placeholders**:
+```bash
+GET /templates/placeholders
+```
+
+### Blocked Queue Items
+
+If a template is missing or disabled when retention runs, the system creates a **BLOCKED** queue item with:
+- `status: "BLOCKED"`
+- `blockedReason: "TEMPLATE_MISSING"` or `"TEMPLATE_DISABLED"`
+
+This ensures no messages are lost and Mike can:
+1. Enable/create the missing template
+2. Re-run retention generation to pick up blocked items
+
+### On-Demand Rendering
+
+If a queue item has no `renderedPreview` (e.g., template was updated after creation), the dispatcher will:
+1. Load the current template
+2. Render using stored `variablesJson`
+3. Send the freshly rendered message
+4. Mark as FAILED if template is missing/disabled
 
 ---
 
@@ -475,12 +592,14 @@ Example:
 
 This workflow shows how Mike's Auto Shop uses the retention system to:
 1. Never miss a customer follow-up
-2. Automate reminder messages
+2. Automate reminder messages with customizable templates
 3. Track all communications
 4. Maintain full control over the process
+5. Support both SMS and WhatsApp messaging
 
 The system is simple, transparent, and extensible for future features like:
 - Automatic scheduling (cron jobs)
-- Birthday messages
-- Appointment reminders
-- Service completion notifications
+- Multi-language template support
+- A/B testing different message variations
+- Integration with WhatsApp Business API
+- Advanced analytics and reporting

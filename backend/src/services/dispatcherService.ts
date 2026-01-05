@@ -1,6 +1,7 @@
 import { prisma } from '../db/client';
 import { QueueStatus, MessageChannel } from '@prisma/client';
 import { getMessagingProvider } from './messaging';
+import { TemplateService } from './templateService';
 
 export class DispatcherService {
   /**
@@ -87,8 +88,41 @@ export class DispatcherService {
     });
 
     try {
-      // Get content (use renderedPreview or fallback)
-      const content = message.renderedPreview || 'Default message content';
+      // Get content - render on-demand if missing
+      let content = message.renderedPreview;
+
+      if (!content) {
+        // On-demand rendering: load template and render with stored variables
+        const template = await TemplateService.getTemplateByTypeAndChannel(
+          message.garageId,
+          message.triggerType,
+          message.channel
+        );
+
+        if (!template || !template.enabled) {
+          // Cannot render - mark as FAILED
+          await prisma.messageQueue.update({
+            where: { id: messageQueueId },
+            data: {
+              status: 'FAILED',
+              lastError: template
+                ? 'Template is disabled'
+                : 'Template not found for this trigger type and channel',
+            },
+          });
+
+          throw new Error(
+            template
+              ? 'Template is disabled'
+              : 'Template not found for this trigger type and channel'
+          );
+        }
+
+        // Parse stored variables and render
+        const variables = JSON.parse(message.variablesJson || '{}');
+        const { rendered } = TemplateService.renderTemplate(template.body, variables);
+        content = rendered;
+      }
 
       // Send via messaging provider
       const provider = getMessagingProvider();

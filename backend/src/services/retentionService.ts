@@ -1,5 +1,6 @@
 import { prisma } from '../db/client';
 import { RetentionRuleType, TriggerType, MessageChannel } from '@prisma/client';
+import { TemplateService } from './templateService';
 
 export class RetentionService {
   /**
@@ -272,6 +273,11 @@ export class RetentionService {
     const blocked: any[] = [];
     const skipped: any[] = [];
 
+    // Get garage info for template variables
+    const garage = await prisma.garage.findUnique({
+      where: { id: garageId },
+    });
+
     for (const car of cars) {
       // Check for existing active queue items for this client/car combination
       const existing = await prisma.messageQueue.findFirst({
@@ -295,17 +301,59 @@ export class RetentionService {
         continue;
       }
 
+      // Resolve template (prefer WhatsApp, fallback to SMS)
+      let template = await TemplateService.getTemplateByTypeAndChannel(
+        garageId,
+        'SERVICE_DUE_TIME',
+        'WHATSAPP'
+      );
+
+      const channel: MessageChannel = template ? 'WHATSAPP' : 'SMS';
+
+      if (!template) {
+        template = await TemplateService.getTemplateByTypeAndChannel(
+          garageId,
+          'SERVICE_DUE_TIME',
+          'SMS'
+        );
+      }
+
+      // If no template found or disabled, create BLOCKED item
+      if (!template || !template.enabled) {
+        const queueItem = await prisma.messageQueue.create({
+          data: {
+            garageId,
+            clientId: car.client.id,
+            carId: car.id,
+            triggerType: 'SERVICE_DUE_TIME',
+            channel,
+            templateKey: template?.templateKey || 'missing',
+            variablesJson: JSON.stringify({}),
+            renderedPreview: null,
+            scheduledFor: new Date(),
+            status: 'BLOCKED',
+            blockedReason: template ? 'TEMPLATE_DISABLED' : 'TEMPLATE_MISSING',
+          },
+        });
+
+        blocked.push(queueItem);
+        continue;
+      }
+
       const daysSinceService = car.lastServiceDate
         ? Math.floor((Date.now() - car.lastServiceDate.getTime()) / (1000 * 60 * 60 * 24))
         : null;
 
       const variables = {
         clientName: car.client.name,
-        licensePlate: car.licensePlate,
-        daysSinceService: daysSinceService || 'unknown',
+        carLicensePlate: car.licensePlate,
+        garageName: garage?.name || '',
+        daysSinceService: daysSinceService || 0,
+        lastServiceDate: car.lastServiceDate || '',
       };
 
-      const renderedMessage = this.interpolateMessage(rule.messageTemplate, variables);
+      // Render template
+      const { rendered } = TemplateService.renderTemplate(template.body, variables);
 
       // Schedule for immediate dispatch
       const scheduledFor = new Date();
@@ -316,10 +364,10 @@ export class RetentionService {
           clientId: car.client.id,
           carId: car.id,
           triggerType: 'SERVICE_DUE_TIME',
-          channel: 'WHATSAPP', // Default to WhatsApp, could be configurable
-          templateKey: rule.id,
+          channel,
+          templateKey: template.templateKey,
           variablesJson: JSON.stringify(variables),
-          renderedPreview: renderedMessage,
+          renderedPreview: rendered,
           scheduledFor,
           status: 'DUE',
         },
@@ -352,6 +400,11 @@ export class RetentionService {
     const blocked: any[] = [];
     const skipped: any[] = [];
 
+    // Get garage info for template variables
+    const garage = await prisma.garage.findUnique({
+      where: { id: garageId },
+    });
+
     for (const car of cars) {
       // Check for existing active queue items
       const existing = await prisma.messageQueue.findFirst({
@@ -375,6 +428,23 @@ export class RetentionService {
         continue;
       }
 
+      // Resolve template (prefer WhatsApp, fallback to SMS)
+      let template = await TemplateService.getTemplateByTypeAndChannel(
+        garageId,
+        'SERVICE_DUE_MILEAGE',
+        'WHATSAPP'
+      );
+
+      const channel: MessageChannel = template ? 'WHATSAPP' : 'SMS';
+
+      if (!template) {
+        template = await TemplateService.getTemplateByTypeAndChannel(
+          garageId,
+          'SERVICE_DUE_MILEAGE',
+          'SMS'
+        );
+      }
+
       // Check if we have mileage data
       if (car.currentMileage === 0) {
         const queueItem = await prisma.messageQueue.create({
@@ -383,13 +453,35 @@ export class RetentionService {
             clientId: car.client.id,
             carId: car.id,
             triggerType: 'SERVICE_DUE_MILEAGE',
-            channel: 'WHATSAPP',
-            templateKey: rule.id,
+            channel,
+            templateKey: template?.templateKey || 'missing',
             variablesJson: JSON.stringify({}),
             renderedPreview: null,
             scheduledFor: new Date(),
             status: 'BLOCKED',
             blockedReason: 'No mileage data available',
+          },
+        });
+
+        blocked.push(queueItem);
+        continue;
+      }
+
+      // If no template found or disabled, create BLOCKED item
+      if (!template || !template.enabled) {
+        const queueItem = await prisma.messageQueue.create({
+          data: {
+            garageId,
+            clientId: car.client.id,
+            carId: car.id,
+            triggerType: 'SERVICE_DUE_MILEAGE',
+            channel,
+            templateKey: template?.templateKey || 'missing',
+            variablesJson: JSON.stringify({}),
+            renderedPreview: null,
+            scheduledFor: new Date(),
+            status: 'BLOCKED',
+            blockedReason: template ? 'TEMPLATE_DISABLED' : 'TEMPLATE_MISSING',
           },
         });
 
@@ -404,12 +496,14 @@ export class RetentionService {
       if (mileageSinceService >= rule.threshold) {
         const variables = {
           clientName: car.client.name,
-          licensePlate: car.licensePlate,
-          mileageSinceService,
+          carLicensePlate: car.licensePlate,
+          garageName: garage?.name || '',
           currentMileage: car.currentMileage,
+          mileageSinceService,
         };
 
-        const renderedMessage = this.interpolateMessage(rule.messageTemplate, variables);
+        // Render template
+        const { rendered } = TemplateService.renderTemplate(template.body, variables);
 
         const queueItem = await prisma.messageQueue.create({
           data: {
@@ -417,10 +511,10 @@ export class RetentionService {
             clientId: car.client.id,
             carId: car.id,
             triggerType: 'SERVICE_DUE_MILEAGE',
-            channel: 'WHATSAPP',
-            templateKey: rule.id,
+            channel,
+            templateKey: template.templateKey,
             variablesJson: JSON.stringify(variables),
-            renderedPreview: renderedMessage,
+            renderedPreview: rendered,
             scheduledFor: new Date(),
             status: 'DUE',
           },
