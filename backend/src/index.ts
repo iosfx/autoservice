@@ -3,7 +3,13 @@ import fastifyJwt from '@fastify/jwt';
 import dotenv from 'dotenv';
 import { healthRoutes } from './routes/health';
 import { authRoutes } from './routes/auth';
-import { jobRoutes } from './routes/jobs';
+import { calendarRoutes } from './routes/calendar';
+import { clientRoutes } from './routes/clients';
+import { carRoutes } from './routes/cars';
+import { retentionRoutes } from './routes/retention';
+import { messageRoutes } from './routes/messages';
+import { dashboardRoutes } from './routes/dashboard';
+import { authenticate } from './middleware/auth';
 import { prisma } from './db/client';
 
 dotenv.config();
@@ -19,13 +25,22 @@ async function buildServer() {
     secret: JWT_SECRET,
   });
 
+  // Add authenticate decorator
+  app.decorate('authenticate', authenticate);
+
   app.addHook('onClose', async () => {
     await prisma.$disconnect();
   });
 
+  // Register routes
   await app.register(healthRoutes);
   await app.register(authRoutes);
-  await app.register(jobRoutes);
+  await app.register(dashboardRoutes);
+  await app.register(calendarRoutes);
+  await app.register(clientRoutes);
+  await app.register(carRoutes);
+  await app.register(retentionRoutes);
+  await app.register(messageRoutes);
 
   return app;
 }

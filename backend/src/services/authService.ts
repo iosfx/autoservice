@@ -1,17 +1,21 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db/client';
 
-export async function registerShopAndUser(params: {
-  shopName: string;
+export async function registerGarageAndUser(params: {
+  garageName: string;
   email: string;
   password: string;
   name?: string;
+  timezone?: string;
 }) {
   const passwordHash = await bcrypt.hash(params.password, 10);
 
   return prisma.$transaction(async (tx) => {
-    const shop = await tx.shop.create({
-      data: { name: params.shopName },
+    const garage = await tx.garage.create({
+      data: {
+        name: params.garageName,
+        timezone: params.timezone || 'UTC',
+      },
     });
 
     const user = await tx.user.create({
@@ -19,11 +23,11 @@ export async function registerShopAndUser(params: {
         email: params.email,
         passwordHash,
         name: params.name,
-        shopId: shop.id,
+        garageId: garage.id,
       },
     });
 
-    return { shop, user };
+    return { garage, user };
   });
 }
 
