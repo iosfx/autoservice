@@ -8,6 +8,7 @@ import { clientRoutes } from './routes/clients';
 import { carRoutes } from './routes/cars';
 import { retentionRoutes } from './routes/retention';
 import { messageRoutes } from './routes/messages';
+import { dashboardRoutes } from './routes/dashboard';
 import { authenticate } from './middleware/auth';
 import { prisma } from './db/client';
 
@@ -34,6 +35,7 @@ async function buildServer() {
   // Register routes
   await app.register(healthRoutes);
   await app.register(authRoutes);
+  await app.register(dashboardRoutes);
   await app.register(calendarRoutes);
   await app.register(clientRoutes);
   await app.register(carRoutes);

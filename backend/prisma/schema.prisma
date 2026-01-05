@@ -22,10 +22,36 @@ enum RetentionRuleType {
   TIME
 }
 
+enum TriggerType {
+  APPT_REMINDER
+  READY
+  FOLLOW_UP
+  INACTIVITY
+  BIRTHDAY
+  SERVICE_DUE_TIME
+  SERVICE_DUE_MILEAGE
+}
+
+enum MessageChannel {
+  SMS
+  WHATSAPP
+}
+
+enum QueueStatus {
+  SCHEDULED
+  DUE
+  SENDING
+  SENT
+  FAILED
+  CANCELED
+  BLOCKED
+}
+
 model Garage {
   id             String          @id @default(uuid())
   name           String
   timezone       String          @default("UTC")
+  lastSyncAt     DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   users          User[]
@@ -33,6 +59,7 @@ model Garage {
   serviceVisits  ServiceVisit[]
   retentionRules RetentionRule[]
   calendarTokens CalendarToken[]
+  messageQueue   MessageQueue[]
 }
 
 model User {
@@ -58,6 +85,7 @@ model Client {
   cars          Car[]
   serviceVisits ServiceVisit[]
   messageLogs   MessageLog[]
+  messageQueue  MessageQueue[]
 
   @@index([garageId])
   @@index([phone])
@@ -74,25 +102,27 @@ model Car {
   updatedAt       DateTime       @updatedAt
   client          Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
   serviceVisits   ServiceVisit[]
+  messageQueue    MessageQueue[]
 
   @@index([clientId])
   @@index([licensePlate])
 }
 
 model ServiceVisit {
-  id              String    @id @default(uuid())
+  id              String         @id @default(uuid())
   garageId        String
   clientId        String
   carId           String?
-  calendarEventId String?   @unique
+  calendarEventId String?        @unique
   serviceDate     DateTime
   mileageAtVisit  Int?
   notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  garage          Garage    @relation(fields: [garageId], references: [id], onDelete: Cascade)
-  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  car             Car?      @relation(fields: [carId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  garage          Garage         @relation(fields: [garageId], references: [id], onDelete: Cascade)
+  client          Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  car             Car?           @relation(fields: [carId], references: [id], onDelete: SetNull)
+  messageQueue    MessageQueue[]
 
   @@index([garageId])
   @@index([clientId])
@@ -115,16 +145,53 @@ model RetentionRule {
 }
 
 model MessageLog {
-  id        String        @id @default(uuid())
-  clientId  String
-  type      MessageType
-  content   String
-  status    MessageStatus
-  sentAt    DateTime      @default(now())
-  client    Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id             String        @id @default(uuid())
+  clientId       String
+  messageQueueId String?
+  type           MessageType
+  content        String
+  status         MessageStatus
+  errorMessage   String?
+  sentAt         DateTime      @default(now())
+  client         Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  messageQueue   MessageQueue? @relation(fields: [messageQueueId], references: [id], onDelete: SetNull)
 
   @@index([clientId])
   @@index([sentAt])
+  @@index([messageQueueId])
+}
+
+model MessageQueue {
+  id              String        @id @default(uuid())
+  garageId        String
+  clientId        String
+  carId           String?
+  serviceVisitId  String?
+  triggerType     TriggerType
+  channel         MessageChannel
+  templateKey     String
+  variablesJson   String        @default("{}")
+  renderedPreview String?
+  scheduledFor    DateTime
+  status          QueueStatus   @default(SCHEDULED)
+  blockedReason   String?
+  lastError       String?
+  retryCount      Int           @default(0)
+  maxRetries      Int           @default(3)
+  sentAt          DateTime?
+  canceledAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  garage          Garage        @relation(fields: [garageId], references: [id], onDelete: Cascade)
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  car             Car?          @relation(fields: [carId], references: [id], onDelete: SetNull)
+  serviceVisit    ServiceVisit? @relation(fields: [serviceVisitId], references: [id], onDelete: SetNull)
+  messageLogs     MessageLog[]
+
+  @@index([garageId, status, scheduledFor])
+  @@index([clientId])
+  @@index([scheduledFor])
+  @@index([status])
 }
 
 model CalendarToken {

@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { MessagingService } from '../services/messagingService';
+import { DispatcherService } from '../services/dispatcherService';
 import { MessageType } from '@prisma/client';
 
 export async function messageRoutes(app: FastifyInstance) {
@@ -77,6 +78,28 @@ export async function messageRoutes(app: FastifyInstance) {
       app.log.error(error);
       return reply.code(500).send({
         message: error.message || 'Failed to get messages',
+      });
+    }
+  });
+
+  // Dispatch due messages from the queue
+  app.post('/messages/dispatch', {
+    onRequest: [app.authenticate],
+  }, async (request, reply) => {
+    try {
+      const { garageId } = request.user as { garageId: string };
+      const { limit } = request.body as { limit?: number };
+
+      const result = await DispatcherService.dispatchDueMessages(
+        garageId,
+        limit || 100
+      );
+
+      return result;
+    } catch (error: any) {
+      app.log.error(error);
+      return reply.code(500).send({
+        message: error.message || 'Failed to dispatch messages',
       });
     }
   });

@@ -1,5 +1,5 @@
 import { prisma } from '../db/client';
-import { RetentionRuleType } from '@prisma/client';
+import { RetentionRuleType, TriggerType, MessageChannel } from '@prisma/client';
 
 export class RetentionService {
   /**
@@ -185,6 +185,7 @@ export class RetentionService {
   /**
    * Process retention alerts and send messages
    * This would be called by a background job
+   * @deprecated Use runRetentionGeneration instead
    */
   static async processRetentionAlerts(garageId: string) {
     const alerts = await this.getRetentionAlerts(garageId);
@@ -201,5 +202,234 @@ export class RetentionService {
       totalAlerts: alerts.length,
       sentMessages,
     };
+  }
+
+  /**
+   * Run retention generation to create MessageQueue items
+   * @param garageId The garage ID
+   * @param lookaheadDays How many days ahead to schedule messages (default: 14)
+   */
+  static async runRetentionGeneration(garageId: string, lookaheadDays: number = 14) {
+    const rules = await this.getRules(garageId);
+    const created: any[] = [];
+    const blocked: any[] = [];
+    const skipped: any[] = [];
+
+    for (const rule of rules) {
+      if (rule.type === 'TIME') {
+        const result = await this.generateTimeBasedQueue(garageId, rule, lookaheadDays);
+        created.push(...result.created);
+        blocked.push(...result.blocked);
+        skipped.push(...result.skipped);
+      } else if (rule.type === 'MILEAGE') {
+        const result = await this.generateMileageBasedQueue(garageId, rule);
+        created.push(...result.created);
+        blocked.push(...result.blocked);
+        skipped.push(...result.skipped);
+      }
+    }
+
+    return {
+      created: created.length,
+      blocked: blocked.length,
+      skipped: skipped.length,
+      items: { created, blocked, skipped },
+    };
+  }
+
+  /**
+   * Generate queue items for time-based retention rules
+   */
+  private static async generateTimeBasedQueue(
+    garageId: string,
+    rule: any,
+    lookaheadDays: number
+  ) {
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() - rule.threshold);
+
+    const lookaheadEnd = new Date();
+    lookaheadEnd.setDate(lookaheadEnd.getDate() + lookaheadDays);
+
+    const cars = await prisma.car.findMany({
+      where: {
+        client: { garageId },
+        OR: [
+          { lastServiceDate: { lte: thresholdDate } },
+          { lastServiceDate: null },
+        ],
+      },
+      include: {
+        client: true,
+        serviceVisits: {
+          orderBy: { serviceDate: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    const created: any[] = [];
+    const blocked: any[] = [];
+    const skipped: any[] = [];
+
+    for (const car of cars) {
+      // Check for existing active queue items for this client/car combination
+      const existing = await prisma.messageQueue.findFirst({
+        where: {
+          garageId,
+          clientId: car.client.id,
+          carId: car.id,
+          triggerType: 'SERVICE_DUE_TIME',
+          status: {
+            in: ['SCHEDULED', 'DUE', 'SENDING'],
+          },
+        },
+      });
+
+      if (existing) {
+        skipped.push({
+          clientId: car.client.id,
+          carId: car.id,
+          reason: 'Active queue item already exists',
+        });
+        continue;
+      }
+
+      const daysSinceService = car.lastServiceDate
+        ? Math.floor((Date.now() - car.lastServiceDate.getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const variables = {
+        clientName: car.client.name,
+        licensePlate: car.licensePlate,
+        daysSinceService: daysSinceService || 'unknown',
+      };
+
+      const renderedMessage = this.interpolateMessage(rule.messageTemplate, variables);
+
+      // Schedule for immediate dispatch
+      const scheduledFor = new Date();
+
+      const queueItem = await prisma.messageQueue.create({
+        data: {
+          garageId,
+          clientId: car.client.id,
+          carId: car.id,
+          triggerType: 'SERVICE_DUE_TIME',
+          channel: 'WHATSAPP', // Default to WhatsApp, could be configurable
+          templateKey: rule.id,
+          variablesJson: JSON.stringify(variables),
+          renderedPreview: renderedMessage,
+          scheduledFor,
+          status: 'DUE',
+        },
+      });
+
+      created.push(queueItem);
+    }
+
+    return { created, blocked, skipped };
+  }
+
+  /**
+   * Generate queue items for mileage-based retention rules
+   */
+  private static async generateMileageBasedQueue(garageId: string, rule: any) {
+    const cars = await prisma.car.findMany({
+      where: {
+        client: { garageId },
+      },
+      include: {
+        client: true,
+        serviceVisits: {
+          orderBy: { serviceDate: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    const created: any[] = [];
+    const blocked: any[] = [];
+    const skipped: any[] = [];
+
+    for (const car of cars) {
+      // Check for existing active queue items
+      const existing = await prisma.messageQueue.findFirst({
+        where: {
+          garageId,
+          clientId: car.client.id,
+          carId: car.id,
+          triggerType: 'SERVICE_DUE_MILEAGE',
+          status: {
+            in: ['SCHEDULED', 'DUE', 'SENDING'],
+          },
+        },
+      });
+
+      if (existing) {
+        skipped.push({
+          clientId: car.client.id,
+          carId: car.id,
+          reason: 'Active queue item already exists',
+        });
+        continue;
+      }
+
+      // Check if we have mileage data
+      if (car.currentMileage === 0) {
+        const queueItem = await prisma.messageQueue.create({
+          data: {
+            garageId,
+            clientId: car.client.id,
+            carId: car.id,
+            triggerType: 'SERVICE_DUE_MILEAGE',
+            channel: 'WHATSAPP',
+            templateKey: rule.id,
+            variablesJson: JSON.stringify({}),
+            renderedPreview: null,
+            scheduledFor: new Date(),
+            status: 'BLOCKED',
+            blockedReason: 'No mileage data available',
+          },
+        });
+
+        blocked.push(queueItem);
+        continue;
+      }
+
+      const lastVisit = car.serviceVisits[0];
+      const mileageAtLastVisit = lastVisit?.mileageAtVisit || 0;
+      const mileageSinceService = car.currentMileage - mileageAtLastVisit;
+
+      if (mileageSinceService >= rule.threshold) {
+        const variables = {
+          clientName: car.client.name,
+          licensePlate: car.licensePlate,
+          mileageSinceService,
+          currentMileage: car.currentMileage,
+        };
+
+        const renderedMessage = this.interpolateMessage(rule.messageTemplate, variables);
+
+        const queueItem = await prisma.messageQueue.create({
+          data: {
+            garageId,
+            clientId: car.client.id,
+            carId: car.id,
+            triggerType: 'SERVICE_DUE_MILEAGE',
+            channel: 'WHATSAPP',
+            templateKey: rule.id,
+            variablesJson: JSON.stringify(variables),
+            renderedPreview: renderedMessage,
+            scheduledFor: new Date(),
+            status: 'DUE',
+          },
+        });
+
+        created.push(queueItem);
+      }
+    }
+
+    return { created, blocked, skipped };
   }
 }

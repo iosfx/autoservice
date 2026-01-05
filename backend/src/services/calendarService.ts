@@ -161,6 +161,12 @@ export class CalendarService {
         syncedEvents.push(serviceVisit);
       }
 
+      // Update garage lastSyncAt
+      await prisma.garage.update({
+        where: { id: garageId },
+        data: { lastSyncAt: new Date() },
+      });
+
       return {
         success: true,
         syncedCount: syncedEvents.length,

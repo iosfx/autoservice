@@ -65,20 +65,68 @@ See [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) for complete API reference.
 - **Client Management**: CRUD operations for clients and their cars
 - **Mileage Tracking**: Track car mileage and service history
 - **Retention Rules**: Create time-based and mileage-based retention triggers
-- **Automated Messaging**: Send WhatsApp/SMS reminders to clients
-- **Retention Alerts**: Get notified when clients are due for service
+- **Message Queue System**: Queue-based message scheduling with status tracking
+- **Manual Triggers**: Run retention generation and dispatch messages on demand
+- **Dashboard Summary**: View counts, stats, and upcoming scheduled messages
+- **Mock Messaging Provider**: Test locally without real API credentials
+- **Queue Management**: Cancel, reschedule, or send individual messages
 
 ## Database Schema
 
 The application uses Prisma ORM with the following main entities:
-- **Garage**: Auto shop/garage
+- **Garage**: Auto shop/garage with last sync tracking
 - **User**: Garage owner/staff
-- **Client**: Customer with contact info
+- **Client**: Customer with contact info and birthday
 - **Car**: Customer's vehicle with mileage tracking
 - **ServiceVisit**: Service appointment (synced from calendar)
 - **RetentionRule**: Rules for when to send reminders
-- **MessageLog**: History of all messages sent
+- **MessageQueue**: Scheduled messages with status tracking (SCHEDULED, DUE, SENDING, SENT, FAILED, CANCELED, BLOCKED)
+- **MessageLog**: Immutable history of all message attempts
 - **CalendarToken**: Google Calendar OAuth tokens
+
+## Retention Queue System
+
+The retention system uses a queue-based approach:
+
+1. **Generation**: Run retention rules to create `MessageQueue` items
+2. **Scheduling**: Queue items track when to send (scheduledFor)
+3. **Dispatch**: Process due messages and update status
+4. **Logging**: Every send attempt creates a `MessageLog` entry
+5. **Retry Logic**: Failed messages automatically retry with exponential backoff
+
+### Queue Status Flow
+
+```
+SCHEDULED → DUE → SENDING → SENT
+                       ↓
+                    FAILED (retry)
+                       ↓
+                    FAILED (max retries)
+```
+
+### Manual Operations
+
+**Run Retention Generation**:
+```bash
+curl -X POST http://localhost:3001/retention/run \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"lookaheadDays": 14}'
+```
+
+**Dispatch Due Messages**:
+```bash
+curl -X POST http://localhost:3001/messages/dispatch \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 100}'
+```
+
+**Check Dashboard**:
+```bash
+curl http://localhost:3001/dashboard/retention-summary \
+  -H "Authorization: Bearer <token>"
+```
 
 ## Project Structure
 
