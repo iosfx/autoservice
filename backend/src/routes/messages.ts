@@ -82,6 +82,28 @@ export async function messageRoutes(app: FastifyInstance) {
     }
   });
 
+  // Get message history (alias for /messages, used by frontend)
+  app.get('/messages/history', {
+    onRequest: [app.authenticate],
+  }, async (request, reply) => {
+    try {
+      const { garageId } = request.user as { garageId: string };
+      const { limit } = request.query as { limit?: string };
+
+      const messages = await MessagingService.getGarageMessages(
+        garageId,
+        limit ? parseInt(limit) : 200
+      );
+
+      return messages || [];
+    } catch (error: any) {
+      app.log.error(error);
+      return reply.code(500).send({
+        message: error.message || 'Failed to get message history',
+      });
+    }
+  });
+
   // Dispatch due messages from the queue
   app.post('/messages/dispatch', {
     onRequest: [app.authenticate],

@@ -17,13 +17,16 @@ interface Message {
 export function MessagesPage() {
   const [filter, setFilter] = useState('');
 
-  const { data: messages } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['messages'],
-    queryFn: () => api.get<Message[]>('/messages/history'),
+    queryFn: () => api.get<Message[] | { messages: Message[] }>('/messages/history'),
   });
 
-  const filteredMessages = messages?.filter((m) =>
-    m.content.toLowerCase().includes(filter.toLowerCase())
+  // Handle both array response and object response
+  const messages = Array.isArray(data) ? data : (data as { messages: Message[] })?.messages || [];
+
+  const filteredMessages = messages.filter((m) =>
+    m?.content?.toLowerCase().includes(filter.toLowerCase())
   );
 
   return (
@@ -37,11 +40,27 @@ export function MessagesPage() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           className="input"
+          disabled={isLoading}
         />
       </Card>
 
-      <div className="space-y-3">
-        {filteredMessages?.map((message) => (
+      {error && (
+        <Card>
+          <div className="text-center text-red-600 py-4">
+            Failed to load messages. Please try refreshing the page.
+          </div>
+        </Card>
+      )}
+
+      {isLoading && (
+        <Card>
+          <div className="text-center text-neutral-500 py-8">Loading messages...</div>
+        </Card>
+      )}
+
+      {!isLoading && !error && (
+        <div className="space-y-3">
+          {filteredMessages.map((message) => (
           <Card key={message.id}>
             <div className="flex items-start justify-between">
               <div className="flex-1">
@@ -69,13 +88,14 @@ export function MessagesPage() {
               </div>
             </div>
           </Card>
-        ))}
-        {filteredMessages?.length === 0 && (
-          <Card>
-            <div className="text-center text-neutral-500 py-8">No messages found</div>
-          </Card>
-        )}
-      </div>
+          ))}
+          {filteredMessages.length === 0 && (
+            <Card>
+              <div className="text-center text-neutral-500 py-8">No messages found</div>
+            </Card>
+          )}
+        </div>
+      )}
     </div>
   );
 }
